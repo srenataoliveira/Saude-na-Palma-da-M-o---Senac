@@ -9,6 +9,7 @@ const authRoutes = require('./routes/authRoutes');
 const clinicaRoutes = require('./routes/clinicaRoutes');
 const especialidadeRoutes = require('./routes/especialidadeRoutes');
 const disponibilidadeRoutes = require('./routes/disponibilidadeRoutes');
+const triagemRoutes = require('./routes/triagemRoutes');
 
 app.use(express.json());
 
@@ -19,6 +20,7 @@ app.use('/auth', authRoutes);
 app.use('/clinicas', clinicaRoutes);
 app.use('/especialidades', especialidadeRoutes);
 app.use('/disponibilidades', disponibilidadeRoutes);
+app.use('/triagem', triagemRoutes);
 
 console.log('ROTA CLINICAS CARREGADA');
 
