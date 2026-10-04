@@ -23,12 +23,87 @@ const Agendamento = {
     return rows;
   },
 
+  async getByPacienteId(idPaciente) {
+    const { rows } = await pool.query(`
+      SELECT
+        a.id,
+        a.id_paciente,
+        p.nome_completo AS paciente,
+        med.nome AS profissional,
+        c.nome AS clinica,
+        a.data_consulta,
+        a.horario_inicio,
+        a.horario_fim,
+        a.status,
+        a.created_at,
+        a.updated_at
+      FROM agendamentos a
+      JOIN pacientes p ON a.id_paciente = p.id
+      JOIN profissionais med ON a.id_profissional = med.id
+      JOIN clinicas c ON a.id_clinica = c.id
+      WHERE a.id_paciente = $1
+    `, [idPaciente]);
+
+    return rows;
+  },
+
   async findById(id) {
     const { rows } = await pool.query(`
       SELECT *
       FROM agendamentos
       WHERE id = $1
     `, [id]);
+
+    return rows[0];
+  },
+
+  async verificarConflito(
+    idProfissional,
+    dataConsulta,
+    horarioInicio,
+    horarioFim
+  ) {
+    const { rows } = await pool.query(`
+      SELECT id
+      FROM agendamentos
+      WHERE id_profissional = $1
+        AND data_consulta = $2
+        AND horario_inicio < $4
+        AND horario_fim > $3
+      LIMIT 1
+    `, [
+      idProfissional,
+      dataConsulta,
+      horarioInicio,
+      horarioFim
+    ]);
+
+    return rows[0];
+  },
+
+  async verificarConflitoAtualizacao(
+    idAgendamento,
+    idProfissional,
+    dataConsulta,
+    horarioInicio,
+    horarioFim
+  ) {
+    const { rows } = await pool.query(`
+      SELECT id
+      FROM agendamentos
+      WHERE id_profissional = $1
+        AND data_consulta = $2
+        AND id <> $5
+        AND horario_inicio < $4
+        AND horario_fim > $3
+      LIMIT 1
+    `, [
+      idProfissional,
+      dataConsulta,
+      horarioInicio,
+      horarioFim,
+      idAgendamento
+    ]);
 
     return rows[0];
   },
