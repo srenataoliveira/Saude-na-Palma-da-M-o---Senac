@@ -1,145 +1,131 @@
-const pool = require('../db');
+const { DataTypes, Model } = require('sequelize');
+const sequelize = require('../sequelize');
 
-const Clinica = {
-  async getAll() {
-    const { rows } = await pool.query(`
-      SELECT
-        id,
-        nome,
-        cnpj,
-        endereco,
-        telefone,
-        email,
-        horario_funcionamento,
-        status,
-        created_at,
-        updated_at
-      FROM clinicas
-    `);
+class Clinica extends Model {
+  static async getAll() {
+    const clinicas = await Clinica.findAll({ order: [['nome', 'ASC']] });
 
-    return rows;
-  },
-
-  async findById(id) {
-    const { rows } = await pool.query(`
-      SELECT
-        id,
-        nome,
-        cnpj,
-        endereco,
-        telefone,
-        email,
-        horario_funcionamento,
-        status,
-        created_at,
-        updated_at
-      FROM clinicas
-      WHERE id = $1
-    `, [id]);
-
-    return rows[0];
-  },
-
-  async create(clinica) {
-    const {
-      nome,
-      cnpj,
-      endereco,
-      telefone,
-      email,
-      horario_funcionamento,
-      status
-    } = clinica;
-
-    const { rows } = await pool.query(`
-      INSERT INTO clinicas (
-        nome,
-        cnpj,
-        endereco,
-        telefone,
-        email,
-        horario_funcionamento,
-        status
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING
-        id,
-        nome,
-        cnpj,
-        endereco,
-        telefone,
-        email,
-        horario_funcionamento,
-        status,
-        created_at,
-        updated_at
-    `, [
-      nome,
-      cnpj,
-      endereco,
-      telefone,
-      email,
-      horario_funcionamento,
-      status
-    ]);
-
-    return rows[0];
-  },
-
-  async update(id, clinica) {
-    const {
-      nome,
-      cnpj,
-      endereco,
-      telefone,
-      email,
-      horario_funcionamento,
-      status
-    } = clinica;
-
-    const { rows } = await pool.query(`
-      UPDATE clinicas
-      SET
-        nome = $1,
-        cnpj = $2,
-        endereco = $3,
-        telefone = $4,
-        email = $5,
-        horario_funcionamento = $6,
-        status = $7,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $8
-      RETURNING
-        id,
-        nome,
-        cnpj,
-        endereco,
-        telefone,
-        email,
-        horario_funcionamento,
-        status,
-        created_at,
-        updated_at
-    `, [
-      nome,
-      cnpj,
-      endereco,
-      telefone,
-      email,
-      horario_funcionamento,
-      status,
-      id
-    ]);
-
-    return rows[0];
-  },
-
-  async delete(id) {
-    await pool.query(
-      'DELETE FROM clinicas WHERE id = $1',
-      [id]
-    );
+    return clinicas.map((clinica) => clinica.toJSON());
   }
-};
+
+  // O paciente só enxerga clínicas ativas.
+  static async getAtivas() {
+    const clinicas = await Clinica.findAll({
+      where: { status: true },
+      order: [['nome', 'ASC']]
+    });
+
+    return clinicas.map((clinica) => clinica.toJSON());
+  }
+
+  static async findById(id) {
+    const clinica = await Clinica.findByPk(id);
+
+    return clinica ? clinica.toJSON() : undefined;
+  }
+
+  static async createClinica(dados) {
+    const clinica = await Clinica.create(Clinica.filtrarCampos(dados));
+
+    return clinica.toJSON();
+  }
+
+  static async updateClinica(id, dados) {
+    const clinica = await Clinica.findByPk(id);
+
+    if (!clinica) {
+      return undefined;
+    }
+
+    await clinica.update(Clinica.filtrarCampos(dados));
+
+    return clinica.toJSON();
+  }
+
+  static async deleteClinica(id) {
+    const clinica = await Clinica.findByPk(id);
+
+    if (!clinica) {
+      return;
+    }
+
+    await clinica.destroy();
+  }
+
+  static filtrarCampos(dados) {
+    const camposPermitidos = [
+      'nome',
+      'cnpj',
+      'endereco',
+      'telefone',
+      'email',
+      'horario_funcionamento',
+      'status'
+    ];
+
+    const permitidos = {};
+
+    for (const campo of camposPermitidos) {
+      if (dados[campo] !== undefined) {
+        permitidos[campo] = dados[campo];
+      }
+    }
+
+    return permitidos;
+  }
+}
+
+Clinica.init(
+  {
+    id: {
+      type: DataTypes.UUID,
+      primaryKey: true,
+      defaultValue: DataTypes.UUIDV4
+    },
+
+    nome: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      validate: { notEmpty: true }
+    },
+
+    cnpj: {
+      type: DataTypes.STRING(20),
+      allowNull: false
+    },
+
+    endereco: {
+      type: DataTypes.TEXT,
+      allowNull: false
+    },
+
+    telefone: {
+      type: DataTypes.STRING
+    },
+
+    email: {
+      type: DataTypes.STRING,
+      validate: { isEmail: true }
+    },
+
+    horario_funcionamento: {
+      type: DataTypes.STRING
+    },
+
+    status: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true
+    }
+  },
+  {
+    sequelize,
+    modelName: 'Clinica',
+    tableName: 'clinicas',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at'
+  }
+);
 
 module.exports = Clinica;

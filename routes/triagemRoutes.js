@@ -1,14 +1,29 @@
-﻿const express = require('express');
-const router = express.Router();
+const express = require('express');
+const rateLimit = require('express-rate-limit');
+
 const triagemController = require('../controllers/triagemController');
 const authMiddleware = require('../middleware/authMiddleware');
 
-// Rotas p├║blicas (para carregar o question├írio)
+const { exigirPapel } = authMiddleware;
+
+const router = express.Router();
+
+const limitarRegistros = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas solicitações. Tente novamente em alguns minutos.' }
+});
+
+router.use(authMiddleware, exigirPapel('paciente'));
+
+// Questionário
 router.get('/categorias', triagemController.listarCategorias);
 router.get('/categorias/:idCategoria/perguntas', triagemController.listarPerguntas);
 
-// Rotas protegidas (exigem que o paciente esteja autenticado)
-router.post('/', authMiddleware, triagemController.registrarTriagem);
-router.get('/meu-historico', authMiddleware, triagemController.obterHistorico);
+// Registro e histórico do próprio paciente
+router.post('/', limitarRegistros, triagemController.registrarTriagem);
+router.get('/meu-historico', triagemController.obterHistorico);
 
 module.exports = router;

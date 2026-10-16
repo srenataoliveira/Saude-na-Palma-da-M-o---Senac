@@ -1,162 +1,126 @@
 const Clinica = require('../models/Clinica');
+const { normalizarEmail, somenteDigitos } = require('../utils/validacao');
+
+function lerDados(body) {
+  const nome = String(body?.nome ?? '').trim();
+  const cnpj = somenteDigitos(body?.cnpj);
+  const endereco = String(body?.endereco ?? '').trim();
+
+  if (!nome || !cnpj || !endereco) {
+    return { erro: 'Nome, CNPJ e endereço são obrigatórios' };
+  }
+
+  if (cnpj.length !== 14) {
+    return { erro: 'CNPJ inválido' };
+  }
+
+  if (body.status !== undefined && typeof body.status !== 'boolean') {
+    return { erro: 'O status deve ser verdadeiro ou falso' };
+  }
+
+  return {
+    dados: {
+      nome,
+      cnpj,
+      endereco,
+      telefone: body.telefone,
+      email: body.email ? normalizarEmail(body.email) : undefined,
+      horario_funcionamento: body.horario_funcionamento,
+      status: body.status
+    }
+  };
+}
+
+function tratarErro(error, res, mensagemPadrao) {
+  if (error.name === 'SequelizeUniqueConstraintError') {
+    return res.status(409).json({ error: 'CNPJ já cadastrado' });
+  }
+
+  if (error.name === 'SequelizeValidationError') {
+    return res.status(400).json({ error: 'Dados inválidos' });
+  }
+
+  console.error(mensagemPadrao, error.name);
+  return res.status(500).json({ error: mensagemPadrao });
+}
 
 const clinicaController = {
-
   async getAll(req, res) {
     try {
-      const clinicas = await Clinica.getAll();
+      const clinicas =
+        req.usuario.role === 'admin'
+          ? await Clinica.getAll()
+          : await Clinica.getAtivas();
 
       return res.status(200).json(clinicas);
     } catch (error) {
-      console.error('Erro ao buscar clínicas:', error);
-
-      return res.status(500).json({
-        error: 'Erro ao buscar clínicas'
-      });
+      return tratarErro(error, res, 'Erro ao buscar clínicas');
     }
   },
 
   async getById(req, res) {
     try {
-      const { id } = req.params;
+      const clinica = await Clinica.findById(req.params.id);
 
-      const clinica = await Clinica.findById(id);
-
-      if (!clinica) {
-        return res.status(404).json({
-          error: 'Clínica não encontrada'
-        });
+      if (!clinica || (!clinica.status && req.usuario.role !== 'admin')) {
+        return res.status(404).json({ error: 'Clínica não encontrada' });
       }
 
       return res.status(200).json(clinica);
     } catch (error) {
-      console.error('Erro ao buscar clínica:', error);
-
-      return res.status(500).json({
-        error: 'Erro ao buscar clínica'
-      });
+      return tratarErro(error, res, 'Erro ao buscar clínica');
     }
   },
 
   async create(req, res) {
     try {
-      const {
-        nome,
-        cnpj,
-        endereco,
-        telefone,
-        email,
-        horario_funcionamento,
-        status
-      } = req.body;
+      const { dados, erro } = lerDados(req.body || {});
+      if (erro) return res.status(400).json({ error: erro });
 
-      if (!nome || !cnpj || !endereco) {
-        return res.status(400).json({
-          error: 'Nome, CNPJ e endereço são obrigatórios'
-        });
-      }
-
-      const clinica = await Clinica.create({
-        nome,
-        cnpj,
-        endereco,
-        telefone,
-        email,
-        horario_funcionamento,
-        status
-      });
+      const clinica = await Clinica.createClinica(dados);
 
       return res.status(201).json(clinica);
     } catch (error) {
-      console.error('Erro ao criar clínica:', error);
-
-      if (error.code === '23505') {
-        return res.status(409).json({
-          error: 'CNPJ já cadastrado'
-        });
-      }
-
-      return res.status(500).json({
-        error: 'Erro ao criar clínica'
-      });
+      return tratarErro(error, res, 'Erro ao criar clínica');
     }
   },
 
   async update(req, res) {
     try {
-      const { id } = req.params;
+      const { dados, erro } = lerDados(req.body || {});
+      if (erro) return res.status(400).json({ error: erro });
 
-      const {
-        nome,
-        cnpj,
-        endereco,
-        telefone,
-        email,
-        horario_funcionamento,
-        status
-      } = req.body;
+      const clinica = await Clinica.updateClinica(req.params.id, dados);
 
-      if (!nome || !cnpj || !endereco) {
-        return res.status(400).json({
-          error: 'Nome, CNPJ e endereço são obrigatórios'
-        });
+      if (!clinica) {
+        return res.status(404).json({ error: 'Clínica não encontrada' });
       }
-
-      const clinicaExistente = await Clinica.findById(id);
-
-      if (!clinicaExistente) {
-        return res.status(404).json({
-          error: 'Clínica não encontrada'
-        });
-      }
-
-      const clinica = await Clinica.update(id, {
-        nome,
-        cnpj,
-        endereco,
-        telefone,
-        email,
-        horario_funcionamento,
-        status
-      });
 
       return res.status(200).json(clinica);
     } catch (error) {
-      console.error('Erro ao atualizar clínica:', error);
-
-      if (error.code === '23505') {
-        return res.status(409).json({
-          error: 'CNPJ já cadastrado'
-        });
-      }
-
-      return res.status(500).json({
-        error: 'Erro ao atualizar clínica'
-      });
+      return tratarErro(error, res, 'Erro ao atualizar clínica');
     }
   },
 
   async delete(req, res) {
     try {
-      const { id } = req.params;
+      const existente = await Clinica.findById(req.params.id);
 
-      const clinicaExistente = await Clinica.findById(id);
-
-      if (!clinicaExistente) {
-        return res.status(404).json({
-          error: 'Clínica não encontrada'
-        });
+      if (!existente) {
+        return res.status(404).json({ error: 'Clínica não encontrada' });
       }
 
-      await Clinica.delete(id);
+      await Clinica.deleteClinica(req.params.id);
 
       return res.status(204).send();
     } catch (error) {
-      console.error('Erro ao excluir clínica:', error);
+      if (error.name === 'SequelizeForeignKeyConstraintError') {
+        return res.status(409).json({
+          error: 'Há profissionais ou agendamentos vinculados a esta clínica. Inative-a em vez de excluir.'
+        });
+      }
 
-      return res.status(500).json({
-        error: 'Erro ao excluir clínica'
-      });
+      return tratarErro(error, res, 'Erro ao excluir clínica');
     }
   }
 };

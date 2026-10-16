@@ -13,4 +13,9 @@ pool.on('connect', () => {
   console.log('Conectado ao banco de dados PostgreSQL com sucesso!');
 });
 
+// Sem este handler, um erro em conexão ociosa derruba o processo inteiro.
+pool.on('error', (error) => {
+  console.error('Erro inesperado no pool do banco:', error.message);
+});
+
 module.exports = pool;

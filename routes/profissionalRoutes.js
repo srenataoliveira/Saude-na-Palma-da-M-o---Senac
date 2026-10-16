@@ -1,18 +1,39 @@
 const express = require('express');
 
+const profissionalController = require('../controllers/profissionalController');
+const portalController = require('../controllers/portalProfissionalController');
+const authMiddleware = require('../middleware/authMiddleware');
+const { UUID_REGEX } = require('../utils/validacao');
+
+const { exigirPapel } = authMiddleware;
+
 const router = express.Router();
 
-const profissionalController = require('../controllers/profissionalController');
-const authMiddleware = require('../middleware/authMiddleware');
+router.use(authMiddleware);
 
-router.get('/', authMiddleware, profissionalController.listarProfissionais);
+router.param('id', (req, res, next, id) => {
+  if (!UUID_REGEX.test(id)) {
+    return res.status(400).json({ error: 'Identificador inválido' });
+  }
+  next();
+});
 
-router.get('/:id', profissionalController.buscarProfissional);
+// Lista pública (sem CPF, e-mail ou telefone): o paciente escolhe o profissional
+router.get('/', profissionalController.listarProfissionais);
 
-router.post('/', profissionalController.criarProfissional);
+// Consulta de horários ocupados por profissional (para pacientes escolherem horários livres)
+router.get('/:id/horarios-ocupados', profissionalController.obterHorariosOcupados);
 
-router.put('/:id', profissionalController.atualizarProfissional);
+// Portal do profissional: tudo usa o id do token, nunca o da URL.
+// Estas rotas precisam vir ANTES das que têm ":id".
+router.get('/me', exigirPapel('profissional'), profissionalController.meuPerfil);
+router.put('/me', exigirPapel('profissional'), profissionalController.atualizarMeuPerfil);
+router.get('/me/agendamentos', exigirPapel('profissional'), portalController.minhaAgenda);
+router.get('/me/agendamentos/:id/triagem', exigirPapel('profissional'), portalController.triagemDaConsulta);
 
-router.delete('/:id', profissionalController.deletarProfissional);
+// Gestão: somente administrador (hoje ninguém tem este papel)
+router.post('/', exigirPapel('admin'), profissionalController.criarProfissional);
+router.put('/:id', exigirPapel('admin'), profissionalController.atualizarProfissional);
+router.delete('/:id', exigirPapel('admin'), profissionalController.deletarProfissional);
 
 module.exports = router;

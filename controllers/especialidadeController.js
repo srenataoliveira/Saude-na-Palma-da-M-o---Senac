@@ -1,134 +1,122 @@
 const Especialidade = require('../models/Especialidade');
 
-const especialidadeController = {
+function tratarErro(error, res, mensagemPadrao) {
+  if (error.name === 'SequelizeUniqueConstraintError') {
+    return res.status(409).json({
+      error: 'Já existe uma especialidade com este nome'
+    });
+  }
 
+  if (error.name === 'SequelizeValidationError') {
+    return res.status(400).json({ error: 'Dados inválidos' });
+  }
+
+  console.error(mensagemPadrao, error.name);
+  return res.status(500).json({ error: mensagemPadrao });
+}
+
+function lerDados(body) {
+  const nome = String(body?.nome ?? '').trim();
+  const { descricao, status } = body || {};
+
+  if (!nome) {
+    return { erro: 'Nome é obrigatório' };
+  }
+
+  if (nome.length > 100) {
+    return { erro: 'O nome deve ter até 100 caracteres' };
+  }
+
+  if (status !== undefined && typeof status !== 'boolean') {
+    return { erro: 'O status deve ser verdadeiro ou falso' };
+  }
+
+  return { dados: { nome, descricao, status } };
+}
+
+const especialidadeController = {
   async getAll(req, res) {
     try {
-      const especialidades = await Especialidade.getAll();
+      const especialidades =
+        req.usuario.role === 'admin'
+          ? await Especialidade.getAll()
+          : await Especialidade.getAtivas();
 
       return res.status(200).json(especialidades);
     } catch (error) {
-      console.error('Erro ao buscar especialidades:', error);
-
-      return res.status(500).json({
-        error: 'Erro ao buscar especialidades'
-      });
+      return tratarErro(error, res, 'Erro ao buscar especialidades');
     }
   },
 
   async getById(req, res) {
     try {
-      const { id } = req.params;
+      const especialidade = await Especialidade.findById(req.params.id);
 
-      const especialidade = await Especialidade.findById(id);
-
-      if (!especialidade) {
-        return res.status(404).json({
-          error: 'Especialidade não encontrada'
-        });
+      if (
+        !especialidade ||
+        (!especialidade.status && req.usuario.role !== 'admin')
+      ) {
+        return res.status(404).json({ error: 'Especialidade não encontrada' });
       }
 
       return res.status(200).json(especialidade);
     } catch (error) {
-      console.error('Erro ao buscar especialidade:', error);
-
-      return res.status(500).json({
-        error: 'Erro ao buscar especialidade'
-      });
+      return tratarErro(error, res, 'Erro ao buscar especialidade');
     }
   },
 
   async create(req, res) {
     try {
-      const {
-        nome,
-        descricao,
-        status
-      } = req.body;
+      const { dados, erro } = lerDados(req.body);
+      if (erro) return res.status(400).json({ error: erro });
 
-      if (!nome) {
-        return res.status(400).json({
-          error: 'Nome é obrigatório'
-        });
-      }
+      const criada = await Especialidade.createEspecialidade(dados);
 
-      const especialidade = await Especialidade.create({
-        nome,
-        descricao,
-        status
-      });
-
-      return res.status(201).json(especialidade);
+      return res.status(201).json(criada);
     } catch (error) {
-      console.error('Erro ao criar especialidade:', error);
-
-      return res.status(500).json({
-        error: 'Erro ao criar especialidade'
-      });
+      return tratarErro(error, res, 'Erro ao criar especialidade');
     }
   },
 
   async update(req, res) {
     try {
-      const { id } = req.params;
+      const { dados, erro } = lerDados(req.body);
+      if (erro) return res.status(400).json({ error: erro });
 
-      const {
-        nome,
-        descricao,
-        status
-      } = req.body;
+      const atualizada = await Especialidade.updateEspecialidade(
+        req.params.id,
+        dados
+      );
 
-      if (!nome) {
-        return res.status(400).json({
-          error: 'Nome é obrigatório'
-        });
+      if (!atualizada) {
+        return res.status(404).json({ error: 'Especialidade não encontrada' });
       }
 
-      const especialidadeExistente = await Especialidade.findById(id);
-
-      if (!especialidadeExistente) {
-        return res.status(404).json({
-          error: 'Especialidade não encontrada'
-        });
-      }
-
-      const especialidade = await Especialidade.update(id, {
-        nome,
-        descricao,
-        status
-      });
-
-      return res.status(200).json(especialidade);
+      return res.status(200).json(atualizada);
     } catch (error) {
-      console.error('Erro ao atualizar especialidade:', error);
-
-      return res.status(500).json({
-        error: 'Erro ao atualizar especialidade'
-      });
+      return tratarErro(error, res, 'Erro ao atualizar especialidade');
     }
   },
 
   async delete(req, res) {
     try {
-      const { id } = req.params;
+      const existente = await Especialidade.findById(req.params.id);
 
-      const especialidadeExistente = await Especialidade.findById(id);
-
-      if (!especialidadeExistente) {
-        return res.status(404).json({
-          error: 'Especialidade não encontrada'
-        });
+      if (!existente) {
+        return res.status(404).json({ error: 'Especialidade não encontrada' });
       }
 
-      await Especialidade.delete(id);
+      await Especialidade.deleteEspecialidade(req.params.id);
 
       return res.status(204).send();
     } catch (error) {
-      console.error('Erro ao excluir especialidade:', error);
+      if (error.name === 'SequelizeForeignKeyConstraintError') {
+        return res.status(409).json({
+          error: 'Há profissionais vinculados a esta especialidade'
+        });
+      }
 
-      return res.status(500).json({
-        error: 'Erro ao excluir especialidade'
-      });
+      return tratarErro(error, res, 'Erro ao excluir especialidade');
     }
   }
 };

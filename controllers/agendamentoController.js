@@ -1,44 +1,45 @@
 const Agendamento = require('../models/Agendamento');
+const Profissional = require('../models/Profissional');
+const Clinica = require('../models/Clinica');
+const Disponibilidade = require('../models/Disponibilidade');
+const Triagem = require('../models/Triagem');
+const {
+  UUID_REGEX,
+  HORARIO_REGEX,
+  dataValida,
+  diaDaSemana,
+  agoraNaClinica
+} = require('../utils/validacao');
 
 async function listarAgendamentos(req, res) {
   try {
-    const agendamentos = await Agendamento.getByPacienteId(
-      req.usuario.id
-    );
+    const agendamentos = await Agendamento.getByPacienteId(req.usuario.id);
 
     res.json(agendamentos);
   } catch (error) {
-    console.error('ERRO AO LISTAR AGENDAMENTOS:', error);
+    console.error('Erro ao listar agendamentos:', error.name);
 
-    res.status(500).json({
-      error: 'Erro ao listar agendamentos'
-    });
+    res.status(500).json({ error: 'Erro ao listar agendamentos' });
   }
 }
 
 async function buscarAgendamento(req, res) {
   try {
-    const id = req.params.id;
+    const agendamento = await Agendamento.findById(req.params.id);
 
-    const agendamento = await Agendamento.findById(id);
-
-    if (!agendamento) {
-      return res.status(404).json({
-        error: 'Agendamento não encontrado'
-      });
-    }
-
-    if (req.usuario.id !== agendamento.id_paciente) {
-      return res.status(403).json({
-        error: 'Você não tem permissão para acessar este agendamento'
-      });
+    // 404 também quando é de outro paciente, para não revelar que existe.
+    if (
+      !agendamento ||
+      String(agendamento.id_paciente) !== String(req.usuario.id)
+    ) {
+      return res.status(404).json({ error: 'Agendamento não encontrado' });
     }
 
     res.json(agendamento);
   } catch (error) {
-    res.status(500).json({
-      error: 'Erro ao buscar agendamento'
-    });
+    console.error('Erro ao buscar agendamento:', error.name);
+
+    res.status(500).json({ error: 'Erro ao buscar agendamento' });
   }
 }
 
@@ -47,36 +48,108 @@ async function criarAgendamento(req, res) {
     const {
       id_profissional,
       id_clinica,
+      id_triagem,
       data_consulta,
       horario_inicio,
-      horario_fim,
-      status
-    } = req.body;
+      horario_fim
+    } = req.body || {};
 
     if (
       !id_profissional ||
       !id_clinica ||
       !data_consulta ||
       !horario_inicio ||
-      !horario_fim ||
-      !status
+      !horario_fim
     ) {
       return res.status(400).json({
-        error: 'Todos os campos do agendamento são obrigatórios'
+        error: 'Profissional, clínica, data e horários são obrigatórios'
       });
     }
 
-    if (horario_inicio >= horario_fim) {
+    if (
+      !UUID_REGEX.test(String(id_profissional)) ||
+      !UUID_REGEX.test(String(id_clinica))
+    ) {
+      return res.status(400).json({ error: 'Profissional ou clínica inválidos' });
+    }
+
+    if (!dataValida(data_consulta)) {
+      return res.status(400).json({ error: 'Data inválida' });
+    }
+
+    if (
+      !HORARIO_REGEX.test(String(horario_inicio)) ||
+      !HORARIO_REGEX.test(String(horario_fim))
+    ) {
+      return res.status(400).json({ error: 'Informe os horários no formato HH:MM' });
+    }
+
+    const inicio = String(horario_inicio).slice(0, 5);
+    const fim = String(horario_fim).slice(0, 5);
+
+    if (inicio >= fim) {
       return res.status(400).json({
         error: 'O horário de início deve ser anterior ao horário de fim'
       });
+    }
+
+    const agora = agoraNaClinica();
+
+    if (
+      data_consulta < agora.data ||
+      (data_consulta === agora.data && inicio <= agora.hora)
+    ) {
+      return res.status(400).json({
+        error: 'Não é possível agendar em um horário que já passou'
+      });
+    }
+
+    const profissional = await Profissional.findById(id_profissional);
+
+    if (!profissional || !profissional.status) {
+      return res.status(404).json({ error: 'Profissional não encontrado' });
+    }
+
+    if (profissional.id_clinica !== id_clinica) {
+      return res.status(400).json({
+        error: 'Este profissional não atende nesta clínica'
+      });
+    }
+
+    const clinica = await Clinica.findById(id_clinica);
+
+    if (!clinica || !clinica.status) {
+      return res.status(404).json({ error: 'Clínica não encontrada' });
+    }
+
+    const cabeNaAgenda = await Disponibilidade.cobreHorario(
+      id_profissional,
+      diaDaSemana(data_consulta),
+      inicio,
+      fim
+    );
+
+    if (!cabeNaAgenda) {
+      return res.status(400).json({
+        error: 'Este horário não está na agenda do profissional'
+      });
+    }
+
+    if (id_triagem) {
+      const triagemValida =
+        UUID_REGEX.test(String(id_triagem)) &&
+        (await Triagem.pertenceAoPaciente(id_triagem, req.usuario.id));
+
+      if (!triagemValida) {
+        return res.status(400).json({ error: 'Pré-triagem inválida' });
+      }
     }
 
     const conflito = await Agendamento.verificarConflito(
       id_profissional,
       data_consulta,
-      horario_inicio,
-      horario_fim
+      inicio,
+      fim
     );
 
     if (conflito) {
@@ -85,142 +158,65 @@ async function criarAgendamento(req, res) {
       });
     }
 
-    const dadosAgendamento = {
+    const agendamentoCriado = await Agendamento.create({
       id_paciente: req.usuario.id,
       id_profissional,
       id_clinica,
+      id_triagem: id_triagem || null,
       data_consulta,
-      horario_inicio,
-      horario_fim,
-      status
-    };
-
-    const agendamentoCriado = await Agendamento.create(
-      dadosAgendamento
-    );
+      horario_inicio: inicio,
+      horario_fim: fim,
+      status: 'Agendado'
+    });
 
     res.status(201).json(agendamentoCriado);
   } catch (error) {
-    console.error('ERRO AO CRIAR AGENDAMENTO:', error);
+    console.error('Erro ao criar agendamento:', error.name);
 
-    res.status(500).json({
-      error: 'Erro ao criar agendamento'
-    });
-  }
-}
-
-async function atualizarAgendamento(req, res) {
-  try {
-    const id = req.params.id;
-
-    const agendamentoExistente = await Agendamento.findById(id);
-
-    if (!agendamentoExistente) {
-      return res.status(404).json({
-        error: 'Agendamento não encontrado'
-      });
-    }
-
-    if (req.usuario.id !== agendamentoExistente.id_paciente) {
-      return res.status(403).json({
-        error: 'Você não tem permissão para atualizar este agendamento'
-      });
-    }
-
-    const {
-      id_profissional,
-      id_clinica,
-      data_consulta,
-      horario_inicio,
-      horario_fim,
-      status
-    } = req.body;
-
-    if (
-      !id_profissional ||
-      !id_clinica ||
-      !data_consulta ||
-      !horario_inicio ||
-      !horario_fim ||
-      !status
-    ) {
-      return res.status(400).json({
-        error: 'Todos os campos do agendamento são obrigatórios'
-      });
-    }
-
-    if (horario_inicio >= horario_fim) {
-      return res.status(400).json({
-        error: 'O horário de início deve ser anterior ao horário de fim'
-      });
-    }
-
-    const conflito = await Agendamento.verificarConflitoAtualizacao(
-      id,
-      id_profissional,
-      data_consulta,
-      horario_inicio,
-      horario_fim
-    );
-
-    if (conflito) {
+    // Dois pacientes confirmando o mesmo horário ao mesmo tempo
+    if (error.name === 'SequelizeExclusionConstraintError') {
       return res.status(409).json({
         error: 'Já existe um agendamento para este profissional neste horário'
       });
     }
 
-    const dadosAtualizados = {
-      id_paciente: agendamentoExistente.id_paciente,
-      id_profissional,
-      id_clinica,
-      data_consulta,
-      horario_inicio,
-      horario_fim,
-      status
-    };
+    if (
+      error.name === 'SequelizeValidationError' ||
+      error.name === 'SequelizeForeignKeyConstraintError'
+    ) {
+      return res.status(400).json({ error: 'Dados do agendamento inválidos' });
+    }
 
-    const agendamentoAtualizado = await Agendamento.update(
-      id,
-      dadosAtualizados
-    );
-
-    res.json(agendamentoAtualizado);
-  } catch (error) {
-    console.error('ERRO AO ATUALIZAR AGENDAMENTO:', error);
-
-    res.status(500).json({
-      error: 'Erro ao atualizar agendamento'
-    });
+    res.status(500).json({ error: 'Erro ao criar agendamento' });
   }
 }
 
-async function deletarAgendamento(req, res) {
+async function cancelarAgendamento(req, res) {
   try {
-    const id = req.params.id;
+    const agendamento = await Agendamento.findById(req.params.id);
 
-    const agendamentoExistente = await Agendamento.findById(id);
+    if (
+      !agendamento ||
+      String(agendamento.id_paciente) !== String(req.usuario.id)
+    ) {
+      return res.status(404).json({ error: 'Agendamento não encontrado' });
+    }
 
-    if (!agendamentoExistente) {
-      return res.status(404).json({
-        error: 'Agendamento não encontrado'
+    if (agendamento.status !== 'Agendado') {
+      return res.status(409).json({
+        error: 'Só é possível cancelar consultas agendadas'
       });
     }
 
-    if (req.usuario.id !== agendamentoExistente.id_paciente) {
-      return res.status(403).json({
-        error: 'Você não tem permissão para deletar este agendamento'
-      });
-    }
-
-    await Agendamento.delete(id);
-
-    res.status(204).send();
-  } catch (error) {
-    console.error('ERRO AO DELETAR AGENDAMENTO:', error);
-
-    res.status(500).json({
-      error: 'Erro ao deletar agendamento'
+    const atualizado = await Agendamento.update(agendamento.id, {
+      status: 'Cancelado'
     });
+
+    res.json(atualizado);
+  } catch (error) {
+    console.error('Erro ao cancelar agendamento:', error.name);
+
+    res.status(500).json({ error: 'Erro ao cancelar agendamento' });
   }
 }
 
@@ -228,6 +224,5 @@ module.exports = {
   listarAgendamentos,
   buscarAgendamento,
   criarAgendamento,
-  atualizarAgendamento,
-  deletarAgendamento
+  cancelarAgendamento
 };
