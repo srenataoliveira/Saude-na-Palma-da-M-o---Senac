@@ -1,18 +1,16 @@
 const express = require('express');
 
-const router = express.Router();
-
 const pacienteController = require('../controllers/pacienteControllers');
 const authMiddleware = require('../middleware/authMiddleware');
 
-router.get('/', authMiddleware, pacienteController.listarPacientes);
+const { exigirPapel } = authMiddleware;
 
-router.get('/:id', authMiddleware, pacienteController.buscarPaciente);
+const router = express.Router();
 
-router.post('/', authMiddleware, pacienteController.criarPaciente);
+router.use(authMiddleware, exigirPapel('paciente'));
 
-router.put('/:id', authMiddleware, pacienteController.atualizarPaciente);
-
-router.delete('/:id', authMiddleware, pacienteController.deletarPaciente);
+// O paciente só acessa os próprios dados; o id vem do token.
+router.get('/me', pacienteController.meusDados);
+router.put('/me', pacienteController.atualizarMeusDados);
 
 module.exports = router;

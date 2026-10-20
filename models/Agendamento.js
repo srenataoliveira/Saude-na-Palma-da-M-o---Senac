@@ -1,60 +1,194 @@
-const pool = require('../db');
+const { DataTypes, Model, Op } = require('sequelize');
+const sequelize = require('../sequelize');
+
+const Paciente = require('./Paciente');
+const Profissional = require('./Profissional');
+const Clinica = require('./Clinica');
+
+const STATUS_VALIDOS = ['Agendado', 'Cancelado', 'Concluido'];
+
+class AgendamentoDB extends Model {}
+
+AgendamentoDB.init(
+  {
+    id: {
+      type: DataTypes.UUID,
+      primaryKey: true,
+      defaultValue: DataTypes.UUIDV4
+    },
+    id_paciente: {
+      type: DataTypes.UUID,
+      allowNull: false
+    },
+    id_profissional: {
+      type: DataTypes.UUID,
+      allowNull: false
+    },
+    id_clinica: {
+      type: DataTypes.UUID,
+      allowNull: false
+    },
+    id_triagem: {
+      type: DataTypes.UUID,
+      allowNull: true
+    },
+    data_consulta: {
+      type: DataTypes.DATEONLY,
+      allowNull: false
+    },
+    horario_inicio: {
+      type: DataTypes.TIME,
+      allowNull: false
+    },
+    horario_fim: {
+      type: DataTypes.TIME,
+      allowNull: false
+    },
+    // A coluna no banco é VARCHAR; por isso STRING + isIn (e não ENUM).
+    status: {
+      type: DataTypes.STRING(50),
+      allowNull: false,
+      defaultValue: 'Agendado',
+      validate: { isIn: [STATUS_VALIDOS] }
+    }
+  },
+  {
+    sequelize,
+    modelName: 'AgendamentoDB',
+    tableName: 'agendamentos',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at'
+  }
+);
+
+AgendamentoDB.belongsTo(Paciente, {
+  foreignKey: 'id_paciente',
+  as: 'pacienteRel'
+});
+
+AgendamentoDB.belongsTo(Profissional, {
+  foreignKey: 'id_profissional',
+  as: 'profissionalRel'
+});
+
+AgendamentoDB.belongsTo(Clinica, {
+  foreignKey: 'id_clinica',
+  as: 'clinicaRel'
+});
+
+function condicaoConflito(idProfissional, dataConsulta, horarioInicio, horarioFim) {
+  return {
+    id_profissional: idProfissional,
+    data_consulta: dataConsulta,
+    // Consulta cancelada libera o horário.
+    status: { [Op.ne]: 'Cancelado' },
+    horario_inicio: { [Op.lt]: horarioFim },
+    horario_fim: { [Op.gt]: horarioInicio }
+  };
+}
 
 const Agendamento = {
-  async getAll() {
-    const { rows } = await pool.query(`
-      SELECT
-        a.id,
-        p.nome_completo AS paciente,
-        med.nome AS profissional,
-        c.nome AS clinica,
-        a.data_consulta,
-        a.horario_inicio,
-        a.horario_fim,
-        a.status,
-        a.created_at,
-        a.updated_at
-      FROM agendamentos a
-      JOIN pacientes p ON a.id_paciente = p.id
-      JOIN profissionais med ON a.id_profissional = med.id
-      JOIN clinicas c ON a.id_clinica = c.id
-    `);
-
-    return rows;
-  },
+  STATUS_VALIDOS,
 
   async getByPacienteId(idPaciente) {
-    const { rows } = await pool.query(`
-      SELECT
-        a.id,
-        a.id_paciente,
-        p.nome_completo AS paciente,
-        med.nome AS profissional,
-        c.nome AS clinica,
-        a.data_consulta,
-        a.horario_inicio,
-        a.horario_fim,
-        a.status,
-        a.created_at,
-        a.updated_at
-      FROM agendamentos a
-      JOIN pacientes p ON a.id_paciente = p.id
-      JOIN profissionais med ON a.id_profissional = med.id
-      JOIN clinicas c ON a.id_clinica = c.id
-      WHERE a.id_paciente = $1
-    `, [idPaciente]);
+    const agendamentos = await AgendamentoDB.findAll({
+      where: { id_paciente: idPaciente },
+      include: [
+        {
+          model: Paciente,
+          as: 'pacienteRel',
+          attributes: ['nome_completo'],
+          required: true
+        },
+        {
+          model: Profissional,
+          as: 'profissionalRel',
+          attributes: ['nome'],
+          required: true
+        },
+        {
+          model: Clinica,
+          as: 'clinicaRel',
+          attributes: ['nome'],
+          required: true
+        }
+      ],
+      order: [
+        ['data_consulta', 'ASC'],
+        ['horario_inicio', 'ASC']
+      ]
+    });
 
-    return rows;
+    return agendamentos.map((item) => {
+      const dados = item.toJSON();
+
+      return {
+        id: dados.id,
+        id_paciente: dados.id_paciente,
+        id_profissional: dados.id_profissional,
+        id_clinica: dados.id_clinica,
+        id_triagem: dados.id_triagem,
+        paciente: dados.pacienteRel.nome_completo,
+        profissional: dados.profissionalRel.nome,
+        clinica: dados.clinicaRel.nome,
+        data_consulta: dados.data_consulta,
+        horario_inicio: dados.horario_inicio,
+        horario_fim: dados.horario_fim,
+        status: dados.status,
+        created_at: dados.created_at,
+        updated_at: dados.updated_at
+      };
+    });
+  },
+
+  // Agenda do profissional. Mostra só o necessário sobre o paciente:
+  // sem CPF, telefone ou e-mail.
+  async getByProfissionalId(idProfissional) {
+    const agendamentos = await AgendamentoDB.findAll({
+      where: { id_profissional: idProfissional },
+      include: [
+        {
+          model: Paciente,
+          as: 'pacienteRel',
+          attributes: ['id', 'nome_completo', 'data_nascimento'],
+          required: true
+        },
+        {
+          model: Clinica,
+          as: 'clinicaRel',
+          attributes: ['nome'],
+          required: true
+        }
+      ],
+      order: [
+        ['data_consulta', 'ASC'],
+        ['horario_inicio', 'ASC']
+      ]
+    });
+
+    return agendamentos.map((item) => {
+      const dados = item.toJSON();
+
+      return {
+        id: dados.id,
+        id_triagem: dados.id_triagem,
+        id_paciente: dados.pacienteRel.id,
+        paciente: dados.pacienteRel.nome_completo,
+        data_nascimento: dados.pacienteRel.data_nascimento,
+        clinica: dados.clinicaRel.nome,
+        data_consulta: dados.data_consulta,
+        horario_inicio: dados.horario_inicio,
+        horario_fim: dados.horario_fim,
+        status: dados.status
+      };
+    });
   },
 
   async findById(id) {
-    const { rows } = await pool.query(`
-      SELECT *
-      FROM agendamentos
-      WHERE id = $1
-    `, [id]);
+    const agendamento = await AgendamentoDB.findByPk(id);
 
-    return rows[0];
+    return agendamento ? agendamento.toJSON() : undefined;
   },
 
   async verificarConflito(
@@ -63,150 +197,96 @@ const Agendamento = {
     horarioInicio,
     horarioFim
   ) {
-    const { rows } = await pool.query(`
-      SELECT id
-      FROM agendamentos
-      WHERE id_profissional = $1
-        AND data_consulta = $2
-        AND horario_inicio < $4
-        AND horario_fim > $3
-      LIMIT 1
-    `, [
-      idProfissional,
-      dataConsulta,
-      horarioInicio,
-      horarioFim
-    ]);
+    const resultado = await AgendamentoDB.findOne({
+      attributes: ['id'],
+      where: condicaoConflito(
+        idProfissional,
+        dataConsulta,
+        horarioInicio,
+        horarioFim
+      )
+    });
 
-    return rows[0];
+    return resultado ? resultado.toJSON() : undefined;
   },
 
-  async verificarConflitoAtualizacao(
-    idAgendamento,
-    idProfissional,
-    dataConsulta,
-    horarioInicio,
-    horarioFim
-  ) {
-    const { rows } = await pool.query(`
-      SELECT id
-      FROM agendamentos
-      WHERE id_profissional = $1
-        AND data_consulta = $2
-        AND id <> $5
-        AND horario_inicio < $4
-        AND horario_fim > $3
-      LIMIT 1
-    `, [
-      idProfissional,
-      dataConsulta,
-      horarioInicio,
-      horarioFim,
-      idAgendamento
-    ]);
+  // Consulta horários ocupados para pacientes escolherem horários livres.
+  // Retorna estritamente data e horários; nenhum dado do paciente ou agendamento.
+  async getHorariosOcupados(idProfissional, dataInicio, dataFim) {
+    const whereClause = {
+      id_profissional: idProfissional,
+      status: { [Op.ne]: 'Cancelado' }
+    };
 
-    return rows[0];
+    if (dataInicio && dataFim) {
+      whereClause.data_consulta = { [Op.between]: [dataInicio, dataFim] };
+    } else if (dataInicio) {
+      whereClause.data_consulta = { [Op.gte]: dataInicio };
+    } else if (dataFim) {
+      whereClause.data_consulta = { [Op.lte]: dataFim };
+    }
+
+    const agendamentos = await AgendamentoDB.findAll({
+      attributes: ['data_consulta', 'horario_inicio', 'horario_fim'],
+      where: whereClause,
+      order: [
+        ['data_consulta', 'ASC'],
+        ['horario_inicio', 'ASC']
+      ]
+    });
+
+    return agendamentos.map((item) => {
+      const dados = item.toJSON();
+      return {
+        data: dados.data_consulta,
+        horario_inicio: dados.horario_inicio,
+        horario_fim: dados.horario_fim
+      };
+    });
   },
 
   async create(agendamento) {
-    const {
-      id_paciente,
-      id_profissional,
-      id_clinica,
-      data_consulta,
-      horario_inicio,
-      horario_fim,
-      status
-    } = agendamento;
+    const camposPermitidos = [
+      'id_paciente',
+      'id_profissional',
+      'id_clinica',
+      'id_triagem',
+      'data_consulta',
+      'horario_inicio',
+      'horario_fim',
+      'status'
+    ];
 
-    const { rows } = await pool.query(`
-      INSERT INTO agendamentos (
-        id_paciente,
-        id_profissional,
-        id_clinica,
-        data_consulta,
-        horario_inicio,
-        horario_fim,
-        status
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING
-        id,
-        id_paciente,
-        id_profissional,
-        id_clinica,
-        data_consulta,
-        horario_inicio,
-        horario_fim,
-        status,
-        created_at,
-        updated_at
-    `, [
-      id_paciente,
-      id_profissional,
-      id_clinica,
-      data_consulta,
-      horario_inicio,
-      horario_fim,
-      status
-    ]);
+    const dados = {};
 
-    return rows[0];
+    for (const campo of camposPermitidos) {
+      if (agendamento[campo] !== undefined) {
+        dados[campo] = agendamento[campo];
+      }
+    }
+
+    const novoAgendamento = await AgendamentoDB.create(dados);
+
+    return novoAgendamento.toJSON();
   },
 
+  // Depois de criado, só o status muda (cancelar, concluir).
   async update(id, agendamento) {
-    const {
-      id_paciente,
-      id_profissional,
-      id_clinica,
-      data_consulta,
-      horario_inicio,
-      horario_fim,
-      status
-    } = agendamento;
+    const registro = await AgendamentoDB.findByPk(id);
 
-    const { rows } = await pool.query(`
-      UPDATE agendamentos
-      SET
-        id_paciente = $1,
-        id_profissional = $2,
-        id_clinica = $3,
-        data_consulta = $4,
-        horario_inicio = $5,
-        horario_fim = $6,
-        status = $7,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $8
-      RETURNING
-        id,
-        id_paciente,
-        id_profissional,
-        id_clinica,
-        data_consulta,
-        horario_inicio,
-        horario_fim,
-        status,
-        created_at,
-        updated_at
-    `, [
-      id_paciente,
-      id_profissional,
-      id_clinica,
-      data_consulta,
-      horario_inicio,
-      horario_fim,
-      status,
-      id
-    ]);
+    if (!registro) {
+      return undefined;
+    }
 
-    return rows[0];
-  },
+    const dados = {};
 
-  async delete(id) {
-    await pool.query(
-      'DELETE FROM agendamentos WHERE id = $1',
-      [id]
-    );
+    if (agendamento.status !== undefined) {
+      dados.status = agendamento.status;
+    }
+
+    await registro.update(dados);
+
+    return registro.toJSON();
   }
 };
 

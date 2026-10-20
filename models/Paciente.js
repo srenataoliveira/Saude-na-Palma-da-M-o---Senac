@@ -1,191 +1,151 @@
-const pool = require('../db');
+const { DataTypes, Model } = require('sequelize');
+const sequelize = require('../sequelize');
+const { normalizarEmail } = require('../utils/validacao');
 
-const Paciente = {
-  async getAll() {
-    const { rows } = await pool.query(`
-      SELECT
-        id,
-        nome_completo,
-        cpf,
-        data_nascimento,
-        telefone,
-        email,
-        contato_emergencia_nome,
-        contato_emergencia_telefone,
-        contato_emergencia_email,
-        relacao_contato,
-        created_at,
-        updated_at
-      FROM pacientes
-    `);
+class Paciente extends Model {
+  // Remove a senha criptografada de qualquer resposta.
+  static dadosPublicos(paciente) {
+    if (!paciente) return null;
 
-    return rows;
-  },
+    const dados = paciente.toJSON();
+    delete dados.senha_hash;
 
-  async findById(id) {
-    const { rows } = await pool.query(`
-      SELECT
-        id,
-        nome_completo,
-        cpf,
-        data_nascimento,
-        telefone,
-        email,
-        contato_emergencia_nome,
-        contato_emergencia_telefone,
-        contato_emergencia_email,
-        relacao_contato,
-        created_at,
-        updated_at
-      FROM pacientes
-      WHERE id = $1
-    `, [id]);
-
-    return rows[0];
-  },
-
-  async findByEmail(email) {
-    const { rows } = await pool.query(`
-      SELECT
-        id,
-        nome_completo,
-        cpf,
-        data_nascimento,
-        telefone,
-        email,
-        senha_hash,
-        contato_emergencia_nome,
-        contato_emergencia_telefone,
-        contato_emergencia_email,
-        relacao_contato,
-        created_at,
-        updated_at
-      FROM pacientes
-      WHERE email = $1
-    `, [email]);
-
-    return rows[0];
-  },
-
-  async create(paciente) {
-    const {
-      nome_completo,
-      cpf,
-      data_nascimento,
-      telefone,
-      email,
-      senha_hash,
-      contato_emergencia_nome,
-      contato_emergencia_telefone,
-      contato_emergencia_email,
-      relacao_contato
-    } = paciente;
-
-    const { rows } = await pool.query(`
-      INSERT INTO pacientes (
-        nome_completo,
-        cpf,
-        data_nascimento,
-        telefone,
-        email,
-        senha_hash,
-        contato_emergencia_nome,
-        contato_emergencia_telefone,
-        contato_emergencia_email,
-        relacao_contato
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-      RETURNING
-        id,
-        nome_completo,
-        cpf,
-        data_nascimento,
-        telefone,
-        email,
-        contato_emergencia_nome,
-        contato_emergencia_telefone,
-        contato_emergencia_email,
-        relacao_contato,
-        created_at,
-        updated_at
-    `, [
-      nome_completo,
-      cpf,
-      data_nascimento,
-      telefone,
-      email,
-      senha_hash,
-      contato_emergencia_nome,
-      contato_emergencia_telefone,
-      contato_emergencia_email,
-      relacao_contato
-    ]);
-
-    return rows[0];
-  },
-
-  async update(id, paciente) {
-    const {
-      nome_completo,
-      cpf,
-      data_nascimento,
-      telefone,
-      email,
-      contato_emergencia_nome,
-      contato_emergencia_telefone,
-      contato_emergencia_email,
-      relacao_contato
-    } = paciente;
-
-    const { rows } = await pool.query(`
-      UPDATE pacientes
-      SET
-        nome_completo = $1,
-        cpf = $2,
-        data_nascimento = $3,
-        telefone = $4,
-        email = $5,
-        contato_emergencia_nome = $6,
-        contato_emergencia_telefone = $7,
-        contato_emergencia_email = $8,
-        relacao_contato = $9,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $10
-      RETURNING
-        id,
-        nome_completo,
-        cpf,
-        data_nascimento,
-        telefone,
-        email,
-        contato_emergencia_nome,
-        contato_emergencia_telefone,
-        contato_emergencia_email,
-        relacao_contato,
-        created_at,
-        updated_at
-    `, [
-      nome_completo,
-      cpf,
-      data_nascimento,
-      telefone,
-      email,
-      contato_emergencia_nome,
-      contato_emergencia_telefone,
-      contato_emergencia_email,
-      relacao_contato,
-      id
-    ]);
-
-    return rows[0];
-  },
-
-  async delete(id) {
-    await pool.query(
-      'DELETE FROM pacientes WHERE id = $1',
-      [id]
-    );
+    return dados;
   }
-};
+
+  // Usa o escopo padrão, que já esconde senha_hash.
+  static async findById(id) {
+    const paciente = await Paciente.findByPk(id);
+    return Paciente.dadosPublicos(paciente);
+  }
+
+  // Único ponto que lê senha_hash: o login precisa dela para comparar.
+  static async findByEmail(email) {
+    return Paciente.unscoped().findOne({
+      where: sequelize.where(
+        sequelize.fn('lower', sequelize.col('email')),
+        normalizarEmail(email)
+      )
+    });
+  }
+
+  static async createPaciente(dados) {
+    const camposPermitidos = [
+      'nome_completo',
+      'cpf',
+      'data_nascimento',
+      'telefone',
+      'email',
+      'senha_hash',
+      'contato_emergencia_nome',
+      'contato_emergencia_telefone',
+      'contato_emergencia_email',
+      'relacao_contato'
+    ];
+
+    const dadosPermitidos = {};
+
+    for (const campo of camposPermitidos) {
+      if (dados[campo] !== undefined) {
+        dadosPermitidos[campo] = dados[campo];
+      }
+    }
+
+    const paciente = await Paciente.create(dadosPermitidos);
+    return Paciente.dadosPublicos(paciente);
+  }
+
+  // CPF e e-mail não entram aqui: são a identidade da conta.
+  static async updatePaciente(id, dados) {
+    const paciente = await Paciente.findByPk(id);
+
+    if (!paciente) return null;
+
+    const camposPermitidos = [
+      'nome_completo',
+      'data_nascimento',
+      'telefone',
+      'contato_emergencia_nome',
+      'contato_emergencia_telefone',
+      'contato_emergencia_email',
+      'relacao_contato'
+    ];
+
+    const dadosPermitidos = {};
+
+    for (const campo of camposPermitidos) {
+      if (dados[campo] !== undefined) {
+        dadosPermitidos[campo] = dados[campo];
+      }
+    }
+
+    await paciente.update(dadosPermitidos);
+
+    return Paciente.dadosPublicos(paciente);
+  }
+}
+
+Paciente.init(
+  {
+    id: {
+      type: DataTypes.UUID,
+      primaryKey: true,
+      defaultValue: DataTypes.UUIDV4
+    },
+    nome_completo: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      validate: { notEmpty: true }
+    },
+    cpf: {
+      type: DataTypes.STRING(14),
+      allowNull: false,
+      validate: { is: /^\d{11}$/ }
+    },
+    data_nascimento: {
+      type: DataTypes.DATEONLY,
+      allowNull: false
+    },
+    telefone: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    email: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      validate: { isEmail: true }
+    },
+    senha_hash: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    contato_emergencia_nome: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    contato_emergencia_telefone: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    contato_emergencia_email: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      validate: { isEmail: true }
+    },
+    relacao_contato: {
+      type: DataTypes.STRING,
+      allowNull: true
+    }
+  },
+  {
+    sequelize,
+    modelName: 'Paciente',
+    tableName: 'pacientes',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at',
+    defaultScope: { attributes: { exclude: ['senha_hash'] } }
+  }
+);
 
 module.exports = Paciente;

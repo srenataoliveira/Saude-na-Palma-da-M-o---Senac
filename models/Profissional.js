@@ -1,165 +1,198 @@
-const pool = require('../db');
+const { DataTypes, Model } = require('sequelize');
+const sequelize = require('../sequelize');
+const { normalizarEmail } = require('../utils/validacao');
 
-const Profissional = {
-  async getAll() {
-    const { rows } = await pool.query(`
-      SELECT
-        id,
-        id_clinica,
-        id_especialidade,
-        nome,
-        cpf,
-        registro_conselho,
-        conselho,
-        telefone,
-        email,
-        status,
-        created_at,
-        updated_at
-      FROM profissionais
-    `);
+class Profissional extends Model {
+  // Visão completa (sem a senha). Uso restrito ao administrador e ao próprio profissional.
+  static async getAll() {
+    const profissionais = await Profissional.findAll({
+      order: [['nome', 'ASC']]
+    });
 
-    return rows;
-  },
-
-  async findById(id) {
-    const { rows } = await pool.query(`
-      SELECT
-        id,
-        id_clinica,
-        id_especialidade,
-        nome,
-        cpf,
-        registro_conselho,
-        conselho,
-        telefone,
-        email,
-        status,
-        created_at,
-        updated_at
-      FROM profissionais
-      WHERE id = $1
-    `, [id]);
-
-    return rows[0];
-  },
-
-  async create(profissional) {
-    const {
-      id_clinica,
-      id_especialidade,
-      nome,
-      cpf,
-      registro_conselho,
-      conselho,
-      telefone,
-      email,
-      status
-    } = profissional;
-
-    const { rows } = await pool.query(`
-      INSERT INTO profissionais (
-        id_clinica,
-        id_especialidade,
-        nome,
-        cpf,
-        registro_conselho,
-        conselho,
-        telefone,
-        email,
-        status
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING
-        id,
-        id_clinica,
-        id_especialidade,
-        nome,
-        cpf,
-        registro_conselho,
-        conselho,
-        telefone,
-        email,
-        status,
-        created_at,
-        updated_at
-    `, [
-      id_clinica,
-      id_especialidade,
-      nome,
-      cpf,
-      registro_conselho,
-      conselho,
-      telefone,
-      email,
-      status
-    ]);
-
-    return rows[0];
-  },
-
-  async update(id, profissional) {
-    const {
-      id_clinica,
-      id_especialidade,
-      nome,
-      cpf,
-      registro_conselho,
-      conselho,
-      telefone,
-      email,
-      status
-    } = profissional;
-
-    const { rows } = await pool.query(`
-      UPDATE profissionais
-      SET
-        id_clinica = $1,
-        id_especialidade = $2,
-        nome = $3,
-        cpf = $4,
-        registro_conselho = $5,
-        conselho = $6,
-        telefone = $7,
-        email = $8,
-        status = $9,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $10
-      RETURNING
-        id,
-        id_clinica,
-        id_especialidade,
-        nome,
-        cpf,
-        registro_conselho,
-        conselho,
-        telefone,
-        email,
-        status,
-        created_at,
-        updated_at
-    `, [
-      id_clinica,
-      id_especialidade,
-      nome,
-      cpf,
-      registro_conselho,
-      conselho,
-      telefone,
-      email,
-      status,
-      id
-    ]);
-
-    return rows[0];
-  },
-
-  async delete(id) {
-    await pool.query(
-      'DELETE FROM profissionais WHERE id = $1',
-      [id]
-    );
+    return profissionais.map((profissional) => profissional.toJSON());
   }
-};
+
+  // Visão pública: o que o paciente precisa para escolher um profissional.
+  // Nunca inclui CPF, e-mail, telefone ou senha.
+  static async getPublicos() {
+    const profissionais = await Profissional.unscoped().findAll({
+      attributes: [
+        'id',
+        'nome',
+        'conselho',
+        'registro_conselho',
+        'uf_conselho',
+        'id_clinica',
+        'id_especialidade',
+        'status'
+      ],
+      where: { status: true },
+      order: [['nome', 'ASC']]
+    });
+
+    return profissionais.map((profissional) => profissional.toJSON());
+  }
+
+  static async findById(id) {
+    const profissional = await Profissional.findByPk(id);
+    return profissional ? profissional.toJSON() : null;
+  }
+
+  // Único ponto que lê senha_hash: o login do profissional.
+  static async findByEmail(email) {
+    return Profissional.unscoped().findOne({
+      where: sequelize.where(
+        sequelize.fn('lower', sequelize.col('email')),
+        normalizarEmail(email)
+      )
+    });
+  }
+
+  static async createProfissional(dados) {
+    const camposPermitidos = [
+      'id_clinica',
+      'id_especialidade',
+      'nome',
+      'cpf',
+      'registro_conselho',
+      'conselho',
+      'uf_conselho',
+      'telefone',
+      'email',
+      'senha_hash',
+      'status'
+    ];
+
+    const dadosPermitidos = {};
+
+    for (const campo of camposPermitidos) {
+      if (dados[campo] !== undefined) {
+        dadosPermitidos[campo] = dados[campo];
+      }
+    }
+
+    const criado = await Profissional.create(dadosPermitidos);
+    const { senha_hash, ...publico } = criado.toJSON();
+
+    return publico;
+  }
+
+  // Edição feita pelo administrador. CPF não muda por aqui.
+  static async updateProfissional(id, dados) {
+    const profissional = await Profissional.findByPk(id);
+
+    if (!profissional) return null;
+
+    const camposPermitidos = [
+      'id_clinica',
+      'id_especialidade',
+      'nome',
+      'registro_conselho',
+      'conselho',
+      'uf_conselho',
+      'telefone',
+      'email',
+      'status'
+    ];
+
+    const dadosPermitidos = {};
+
+    for (const campo of camposPermitidos) {
+      if (dados[campo] !== undefined) {
+        dadosPermitidos[campo] = dados[campo];
+      }
+    }
+
+    await profissional.update(dadosPermitidos);
+
+    return profissional.toJSON();
+  }
+
+  // Edição feita pelo próprio profissional.
+  static async updatePerfil(id, dados) {
+    const profissional = await Profissional.findByPk(id);
+
+    if (!profissional) return null;
+
+    const dadosPermitidos = {};
+
+    for (const campo of ['nome', 'telefone']) {
+      if (dados[campo] !== undefined) {
+        dadosPermitidos[campo] = dados[campo];
+      }
+    }
+
+    await profissional.update(dadosPermitidos);
+
+    return profissional.toJSON();
+  }
+}
+
+Profissional.init(
+  {
+    id: {
+      type: DataTypes.UUID,
+      primaryKey: true,
+      defaultValue: DataTypes.UUIDV4
+    },
+    id_clinica: {
+      type: DataTypes.UUID,
+      allowNull: true
+    },
+    id_especialidade: {
+      type: DataTypes.UUID,
+      allowNull: true
+    },
+    nome: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      validate: { notEmpty: true }
+    },
+    cpf: {
+      type: DataTypes.STRING(14),
+      allowNull: false,
+      validate: { is: /^\d{11}$/ }
+    },
+    registro_conselho: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    conselho: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    uf_conselho: {
+      type: DataTypes.STRING(2),
+      allowNull: true
+    },
+    telefone: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    email: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      validate: { isEmail: true }
+    },
+    senha_hash: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    status: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true
+    }
+  },
+  {
+    sequelize,
+    modelName: 'Profissional',
+    tableName: 'profissionais',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at',
+    defaultScope: { attributes: { exclude: ['senha_hash'] } }
+  }
+);
 
 module.exports = Profissional;
