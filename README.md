@@ -12,6 +12,7 @@ API RESTful desenvolvida com Node.js e Express para gerenciamento e agendamento 
 - **CORS**: Middleware para liberação de acesso entre origens diferentes.
 - **bcrypt**: Criptografia e segurança de senhas de usuários.
 - **dotenv**: Gerenciamento de variáveis de ambiente.
+- **Sequelize**: Tradução entre códigos e Manipulação de Banco de Dados.
 
 ---
 
