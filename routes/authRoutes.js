@@ -16,5 +16,6 @@ const limitarTentativas = rateLimit({
 router.post('/cadastro', limitarTentativas, authController.cadastrar);
 router.post('/login', limitarTentativas, authController.login);
 router.post('/profissional/login', limitarTentativas, authController.loginProfissional);
+router.post('/admin/login', limitarTentativas, authController.loginAdmin);
 
 module.exports = router;
