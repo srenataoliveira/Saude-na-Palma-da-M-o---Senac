@@ -1,5 +1,6 @@
 const Triagem = require('../models/Triagem');
 const { UUID_REGEX } = require('../utils/validacao');
+const { classificarTriagem } = require('../services/classificacaoTriagem');
 
 const TAMANHO_MAXIMO_TEXTO = 1000;
 
@@ -198,9 +199,32 @@ async function registrarTriagem(req, res) {
       }
     }
 
-    // O protótipo registra a pré-triagem sem afirmar um diagnóstico
-    // ou determinar automaticamente uma urgência clínica.
-    const statusFinal = 'Pre_triagem_registrada';
+    // Classificação demonstrativa do protótipo acadêmico.
+    let classificacao = null;
+
+    console.log('Categoria recebida:', JSON.stringify(categoria.nome_categoria));
+
+    if (
+      categoria.nome_categoria === 'Sintomas respiratórios' ||
+      categoria.nome_categoria === 'Dor de cabeça e sintomas neurológicos' ||
+      categoria.nome_categoria === 'Sintomas gastrointestinais' ||
+      categoria.nome_categoria === 'Dores musculares e articulares' ||
+      categoria.nome_categoria === 'Sintomas urinários' ||
+      categoria.nome_categoria === 'Problemas de pele' ||
+      categoria.nome_categoria === 'Febre e mal-estar geral' ||
+      categoria.nome_categoria === 'Sintomas de ouvido, nariz e garganta' ||
+      categoria.nome_categoria === 'Sintomas oculares' ||
+      categoria.nome_categoria === 'Outros sintomas'
+    ) {
+      classificacao = classificarTriagem(
+        categoria,
+        perguntasDaCategoria,
+        respostas
+      );
+    }
+
+// Mantemos o status original no banco de dados.
+const statusFinal = 'Pre_triagem_registrada';
 
     const resultado = await Triagem.salvarTriagem(
       idPaciente,
@@ -212,6 +236,7 @@ async function registrarTriagem(req, res) {
     return res.status(201).json({
       message: 'Pré-triagem registrada com sucesso.',
       triagem: resultado,
+      classificacao,
       aviso:
         'Este registro não é um diagnóstico nem substitui uma avaliação profissional.'
     });
