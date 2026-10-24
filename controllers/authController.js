@@ -166,8 +166,50 @@ async function loginProfissional(req, res) {
   }
 }
 
+// Conta única operacional definida por ambiente; o hash nunca fica no código.
+async function loginAdmin(req, res) {
+  try {
+    const adminEmail = process.env.ADMIN_EMAIL;
+    const adminSenhaHash = process.env.ADMIN_SENHA_HASH;
+
+    if (!adminEmail || !adminSenhaHash) {
+      return res.status(503).json({
+        error: 'Login administrativo não configurado'
+      });
+    }
+
+    const { email, senha } = req.body || {};
+    const emailNormalizado = normalizarEmail(email);
+
+    if (!emailNormalizado || !senha) {
+      return res.status(400).json({ error: 'Informe e-mail e senha' });
+    }
+
+    const emailValido = emailNormalizado === normalizarEmail(adminEmail);
+    const senhaValida = emailValido
+      ? await bcrypt.compare(String(senha), adminSenhaHash)
+      : false;
+
+    if (!emailValido || !senhaValida) {
+      return res.status(401).json({ error: 'E-mail ou senha inválidos' });
+    }
+
+    res.status(200).json({
+      message: 'Login realizado com sucesso',
+      token: gerarToken({ id: 'admin', email: emailNormalizado }, 'admin'),
+      admin: {
+        email: emailNormalizado
+      }
+    });
+  } catch (error) {
+    console.error('Erro no login do administrador:', error.name);
+    res.status(500).json({ error: 'Erro ao realizar login' });
+  }
+}
+
 module.exports = {
   cadastrar,
   login,
-  loginProfissional
+  loginProfissional,
+  loginAdmin
 };
