@@ -92,7 +92,8 @@ module.exports = {
     { name: 'Especialidades', description: 'Consulta e gestão de especialidades.' },
     { name: 'Disponibilidades', description: 'Janelas semanais de atendimento dos profissionais.' },
     { name: 'Triagem', description: 'Questionários, registro de pré-triagem e histórico.' },
-    { name: 'Agendamentos', description: 'Consulta, criação e cancelamento de agendamentos.' }
+    { name: 'Agendamentos', description: 'Consulta, criação e cancelamento de agendamentos.' },
+    { name: 'Administração', description: 'Ações exclusivas do administrador, como redefinir senha.' }
   ],
   components: {
     securitySchemes: {
@@ -639,6 +640,35 @@ module.exports = {
           403: respostas.erro403,
           404: respostaErro('Agendamento não encontrado.', 'Agendamento não encontrado'),
           409: respostaErro('Somente agendamentos ativos podem ser cancelados.', 'Só é possível cancelar consultas agendadas')
+        }
+      })
+    },
+    '/admin/senha-temporaria': {
+      post: operacao({
+        resumo: 'Definir senha temporária',
+        descricao: 'Gera uma senha temporária para o paciente ou profissional dono do e-mail informado. A senha é devolvida apenas nesta resposta e deve ser repassada presencialmente pela recepção. Não envia e-mail.',
+        tag: 'Administração',
+        papel: 'admin',
+        body: jsonBody(esquemaObjeto({
+          email: campo('string', 'E-mail cadastrado do paciente ou do profissional', { format: 'email' })
+        }, ['email']), { email: 'robertaalves@email.com' }),
+        responses: {
+          200: {
+            description: 'Senha temporária definida.',
+            content: {
+              'application/json': {
+                example: {
+                  perfil: 'paciente',
+                  nome: 'Roberta Alves',
+                  email: 'robertaalves@email.com',
+                  senha_temporaria: 'K7F2M9QX'
+                }
+              }
+            }
+          },
+          400: respostaErro('E-mail não informado.', 'Informe o e-mail'),
+          403: respostas.erro403,
+          404: respostaErro('Conta não encontrada ou inativa.', 'Não encontramos uma conta ativa com este e-mail')
         }
       })
     }

@@ -36,6 +36,7 @@ const clinicaRoutes = require('./routes/clinicaRoutes');
 const especialidadeRoutes = require('./routes/especialidadeRoutes');
 const disponibilidadeRoutes = require('./routes/disponibilidadeRoutes');
 const triagemRoutes = require('./routes/triagemRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 
 const origensPermitidas = (
   process.env.CORS_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173'
@@ -62,6 +63,7 @@ app.use('/clinicas', clinicaRoutes);
 app.use('/especialidades', especialidadeRoutes);
 app.use('/disponibilidades', disponibilidadeRoutes);
 app.use('/triagem', triagemRoutes);
+app.use('/admin', adminRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Rota não encontrada' });
