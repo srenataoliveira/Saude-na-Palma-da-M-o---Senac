@@ -3,6 +3,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const swaggerUi = require('swagger-ui-express');
+const openapi = require('./docs/openapi');
 
 const obrigatorias = [
   'DB_HOST',
@@ -49,6 +51,8 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json({ limit: '100kb' }));
+
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(openapi));
 
 app.use('/pacientes', pacienteRoutes);
 app.use('/profissionais', profissionalRoutes);
