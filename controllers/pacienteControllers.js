@@ -35,6 +35,10 @@ async function atualizarMeusDados(req, res) {
       return res.status(400).json({ error: 'Dados inválidos' });
     }
 
+    if (error.name === 'SequelizeDatabaseError') {
+      return res.status(400).json({ error: 'Dados inválidos' });
+    }
+
     return res.status(500).json({ error: 'Erro ao atualizar paciente' });
   }
 }

@@ -104,7 +104,11 @@ Paciente.init(
     },
     data_nascimento: {
       type: DataTypes.DATEONLY,
-      allowNull: false
+      allowNull: false,
+      validate: {
+        notEmpty: { msg: 'Informe a data de nascimento' },
+        isDate: { msg: 'Data de nascimento inválida' }
+      }
     },
     telefone: {
       type: DataTypes.STRING,
