@@ -526,6 +526,66 @@ module.exports = {
         responses: { 204: respostas.semConteudo, 400: respostaErro('Identificador inválido.', 'Identificador inválido'), 403: respostas.erro403, 404: respostaErro('Disponibilidade não encontrada.', 'Disponibilidade não encontrada') }
       })
     },
+    '/triagem/analisar': {
+      post: operacao({
+        resumo: 'Analisar sintomas com IA e recomendar especialidade',
+        descricao: 'Recebe a categoria, a descrição livre do paciente, a intensidade e a duração dos sintomas, e devolve até três especialidades recomendadas por inteligência artificial, já validadas contra as especialidades ativas no banco. Se a IA estiver indisponível ou demorar mais que o limite, a resposta cai automaticamente na classificação por regras e é marcada com origem "regras". A recomendação é orientativa: não é diagnóstico e não substitui avaliação médica.',
+        tag: 'Triagem',
+        papel: 'paciente',
+        body: jsonBody(esquemaObjeto({
+          id_categoria: campo('string', 'UUID da categoria selecionada', { format: 'uuid' }),
+          descricao: campo('string', 'Relato do paciente com as próprias palavras', { maxLength: 500 }),
+          intensidade: campo('integer', 'Intensidade percebida do sintoma, de 0 a 10', { minimum: 0, maximum: 10, nullable: true }),
+          duracao_dias: campo('integer', 'Há quantos dias os sintomas começaram', { minimum: 0, maximum: 365, nullable: true }),
+          respostas: { type: 'array', minItems: 1, description: 'Uma resposta por pergunta da categoria.', items: { $ref: '#/components/schemas/RespostaTriagem' } }
+        }, ['id_categoria', 'respostas']), {
+          id_categoria: 'c9428888-122b-4f58-9a7b-7f8c2f3a1b10',
+          descricao: 'Estou com tosse seca e febre há três dias. Piora à noite.',
+          intensidade: 6,
+          duracao_dias: 3,
+          respostas: [
+            { id_pergunta: 'd9428888-122b-4f58-9a7b-7f8c2f3a1b10', resposta_bool: true },
+            { id_pergunta: 'e9428888-122b-4f58-9a7b-7f8c2f3a1b10', resposta_texto: 'Sintomas iniciados há dois dias.' }
+          ]
+        }),
+        responses: {
+          201: {
+            description: 'Pré-triagem analisada e registrada, com a recomendação e o aviso de caráter orientativo.',
+            content: {
+              'application/json': {
+                example: {
+                  message: 'Pré-triagem analisada com sucesso.',
+                  triagem: {
+                    id: 'f9428888-122b-4f58-9a7b-7f8c2f3a1b10',
+                    status_final: 'Pre_triagem_registrada',
+                    data_registro: '2026-10-25T10:00:00.000Z',
+                    intensidade: 6,
+                    duracao_dias: 3,
+                    especialidades_recomendadas: ['e0000001-0000-4000-8000-000000000001']
+                  },
+                  classificacao: 'PRESENCIAL',
+                  recomendacao: {
+                    especialidades: [
+                      { id: 'e0000001-0000-4000-8000-000000000001', nome: 'Clínica Geral', confianca: 0.9 }
+                    ],
+                    justificativa: 'Sintomas compatíveis com infecção respiratória aguda, com indicação de avaliação inicial.',
+                    origem: 'ia',
+                    modelo: 'gemini-3.5-flash-lite'
+                  },
+                  aviso: 'Recomendação gerada por inteligência artificial como orientação inicial. Não é diagnóstico e não substitui avaliação médica.'
+                }
+              }
+            }
+          },
+          400: respostaErro('Categoria, respostas, descrição, intensidade ou duração inválidas.', 'A descrição deve ter até 500 caracteres.'),
+          401: respostaErro('Sessão inválida.', 'Usuário não autenticado corretamente.'),
+          403: respostas.erro403,
+          404: respostaErro('Categoria de triagem não encontrada.', 'Categoria de triagem não encontrada.'),
+          429: respostaErro('Limite de análises por IA excedido na janela de tempo.', 'Muitas análises em pouco tempo. Tente novamente em alguns minutos.'),
+          500: respostaErro('Falha ao registrar a pré-triagem.', 'Não foi possível registrar a pré-triagem.')
+        }
+      })
+    },
     '/triagem/categorias': {
       get: operacao({
         resumo: 'Listar categorias de triagem',
