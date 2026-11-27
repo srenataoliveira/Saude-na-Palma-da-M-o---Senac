@@ -44,7 +44,15 @@ const Triagem = {
     return rows;
   },
 
-  async salvarTriagem(idPaciente, idCategoria, statusFinal, respostas) {
+    // O 5º parâmetro é opcional: quem chama com 4 continua funcionando igual.
+  async salvarTriagem(idPaciente, idCategoria, statusFinal, respostas, extras = {}) {
+    const {
+      intensidade = null,
+      duracaoDias = null,
+      descricao = null,
+      especialidadesRecomendadas = null
+    } = extras;
+
     const client = await pool.connect();
     let transacaoIniciada = false;
 
@@ -54,11 +62,21 @@ const Triagem = {
 
       const resHistorico = await client.query(`
         INSERT INTO historico_triagem_paciente
-          (id_paciente, id_categoria_selecionada, status_final)
-        VALUES ($1, $2, $3)
-        RETURNING id, status_final, data_registro
-      `, [idPaciente, idCategoria, statusFinal]);
-
+          (id_paciente, id_categoria_selecionada, status_final,
+           intensidade, duracao_dias, descricao, especialidades_recomendadas)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id, status_final, data_registro,
+                  intensidade, duracao_dias, especialidades_recomendadas
+      `, [
+        idPaciente,
+        idCategoria,
+        statusFinal,
+        intensidade,
+        duracaoDias,
+        descricao,
+        especialidadesRecomendadas
+      ]);
+      
       const historicoCriado = resHistorico.rows[0];
 
       for (const resp of respostas) {
